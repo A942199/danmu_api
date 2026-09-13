@@ -3,3 +3,8 @@ main = "danmu_api/worker.js"
 compatibility_date = "2025-09-13"
 keep_vars = true
 compatibility_flags = ["nodejs_compat"]
+
+[vars]
+TOKEN = "87654321"
+SOURCE_ORDER = "douban,360,tencent,youku,iqiyi,imgo,bilibili,migu,renren,hanjutv,sohu,leshi,xigua"
+DANMU_OUTPUT_FORMAT = "json"
