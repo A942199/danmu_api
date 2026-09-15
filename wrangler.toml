@@ -6,5 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 TOKEN = "87654321"
-SOURCE_ORDER = "douban,360,tencent,youku,iqiyi,imgo,bilibili,migu,renren,hanjutv,sohu,leshi,xigua"
+SOURCE_ORDER = "360,tencent,youku"
+PLATFORM_ORDER = "qq,youku,qiyi"
+SEARCH_CACHE_MINUTES = "5"
 DANMU_OUTPUT_FORMAT = "json"
