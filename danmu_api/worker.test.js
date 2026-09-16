@@ -4526,6 +4526,26 @@ test('bilibili comment diagnostics expose the first-segment outcome safely', asy
     assert.equal(body.diagnostic, true);
     assert.equal(body.firstSegmentParsedCount, 0);
     assert.equal(body.firstSegmentError, 'http_412');
+
+    BilibiliSource.prototype.getEpisodeDanmuSegments = async () => new SegmentListResponse({
+      type: 'bilibili1', duration: 0, segmentList: []
+    });
+    const riskControlFetch = async url => {
+      const target = String(url);
+      assert.match(target, /pgc\/view\/web\/season\?ep_id=351870/);
+      return mockJsonResponse({ code: -352, message: 'risk control' }, target);
+    };
+    req = new MockRequest(
+      `${urlPrefix}/api/v2/comment?url=${encodeURIComponent(sourceUrl)}&format=json&diagnostic=1`,
+      { method: 'GET' }
+    );
+    body = await withMockFetch(riskControlFetch, () => handleRequest(req));
+    body = await parseResponse(body);
+    assert.equal(body.firstSegmentError, 'video_info_unavailable');
+    assert.equal(body.videoInfoHttpStatus, 200);
+    assert.equal(body.videoInfoCode, -352);
+    assert.equal(body.videoInfoEpisodeFound, false);
+    assert.equal(body.videoInfoError, '');
   } finally {
     BilibiliSource.prototype.getEpisodeDanmuSegments = originalSegments;
     BilibiliSource.prototype.getEpisodeSegmentDanmu = originalSegmentDanmu;

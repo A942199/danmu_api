@@ -2715,6 +2715,44 @@ function classifyCommentDiagnosticError(error) {
   return 'request_failed';
 }
 
+async function diagnoseBilibiliVideoInfoRequest(cleanUrl) {
+  const defaults = {
+    videoInfoHttpStatus: 0,
+    videoInfoCode: 0,
+    videoInfoEpisodeFound: false,
+    videoInfoError: '',
+  };
+  let epid = '';
+  try {
+    epid = new URL(cleanUrl).pathname.match(/\/ep(\d+)/i)?.[1] || '';
+  } catch {}
+  if (!epid) return { ...defaults, videoInfoError: 'unsupported_episode_url' };
+
+  try {
+    const response = await sourceLogContext.run('bilibili', () => httpGet(
+      `https://api.bilibili.com/pgc/view/web/season?ep_id=${encodeURIComponent(epid)}`,
+      { headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" } }
+    ));
+    const data = typeof response?.data === 'string' ? JSON.parse(response.data) : response?.data;
+    const code = Number(data?.code);
+    const episodes = data?.result?.episodes || data?.result?.main_section?.episodes || [];
+    return {
+      videoInfoHttpStatus: Number(response?.status) || 0,
+      videoInfoCode: Number.isFinite(code) ? code : 0,
+      videoInfoEpisodeFound: Array.isArray(episodes) && episodes.some(item => String(item?.id ?? '') === epid),
+      videoInfoError: '',
+    };
+  } catch (error) {
+    const errorCode = classifyCommentDiagnosticError(error);
+    const httpStatus = /^http_(\d{3})$/.exec(errorCode)?.[1];
+    return {
+      ...defaults,
+      videoInfoHttpStatus: httpStatus ? Number(httpStatus) : 0,
+      videoInfoError: errorCode,
+    };
+  }
+}
+
 export async function diagnoseCommentByUrl(videoUrl) {
   const cleanUrl = stripLinkOffset(String(videoUrl || '').trim()).cleanUrl;
   if (!cleanUrl || (!cleanUrl.includes('.bilibili.com') && !cleanUrl.includes('b23.tv'))) {
@@ -2736,7 +2774,17 @@ export async function diagnoseCommentByUrl(videoUrl) {
   const segmentList = Array.isArray(segments?.segmentList) ? segments.segmentList : [];
   const duration = Number(segments?.duration) || 0;
   if (!segmentList.length) {
-    return { success: true, diagnostic: true, platform: 'bilibili1', segmentCount: 0, duration, firstSegmentParsedCount: 0, firstSegmentError: 'video_info_unavailable' };
+    const videoInfoProbe = await diagnoseBilibiliVideoInfoRequest(resolvedUrl);
+    return {
+      success: true,
+      diagnostic: true,
+      platform: 'bilibili1',
+      segmentCount: 0,
+      duration,
+      firstSegmentParsedCount: 0,
+      firstSegmentError: 'video_info_unavailable',
+      ...videoInfoProbe,
+    };
   }
 
   try {
