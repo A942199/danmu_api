@@ -4583,6 +4583,64 @@ test('bilibili comment diagnostics expose the first-segment outcome safely', asy
   }
 });
 
+test('bilibili pure ep URLs fall back to the configured proxy after direct risk-control failure', async () => {
+  Globals.init({ PROXY_URL: 'bilibili@https://bili-proxy.example', RATE_LIMIT_MAX_REQUESTS: '0' });
+  const source = new BilibiliSource();
+  const seen = [];
+  const sourceUrl = 'https://www.bilibili.com/bangumi/play/ep351870?bsource=360ogvys';
+
+  await withMockFetch(async (url) => {
+    const target = String(url);
+    seen.push(target);
+    if (target === 'https://api.bilibili.com/pgc/view/web/season?ep_id=351870') {
+      return {
+        ok: false,
+        status: 412,
+        url: target,
+        headers: new Headers(),
+        text: async () => '',
+      };
+    }
+    if (target === 'https://bili-proxy.example/pgc/view/web/season?ep_id=351870') {
+      return mockJsonResponse({
+        code: 0,
+        result: {
+          episodes: [{ id: 351870, cid: 249780988, aid: 987654, duration: 5640000, long_title: '第1集' }],
+        },
+      }, target);
+    }
+    throw new Error(`unexpected request: ${target}`);
+  }, async () => {
+    const segments = await source.getEpisodeDanmuSegments(sourceUrl);
+    assert.equal(segments.duration, 5640);
+    assert.equal(segments.segmentList.length, 16);
+    assert.match(segments.segmentList[0].url, /oid=249780988/);
+    assert.match(segments.segmentList[0].url, /pid=987654/);
+  });
+
+  assert.ok(seen.includes('https://api.bilibili.com/pgc/view/web/season?ep_id=351870'));
+  assert.ok(seen.includes('https://bili-proxy.example/pgc/view/web/season?ep_id=351870'));
+});
+
+test('bilibili segment requests use the configured proxy', async () => {
+  Globals.init({ PROXY_URL: 'bilibili@https://bili-proxy.example', RATE_LIMIT_MAX_REQUESTS: '0' });
+  const source = new BilibiliSource();
+  const seen = [];
+  const segmentUrl = 'https://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid=249780988&segment_index=1';
+
+  await withMockFetch(async (url) => {
+    const target = String(url);
+    seen.push(target);
+    assert.equal(target, 'https://bili-proxy.example/x/v2/dm/web/seg.so?type=1&oid=249780988&segment_index=1');
+    return new Response(new Uint8Array(), { status: 200 });
+  }, async () => {
+    const comments = await source.getEpisodeSegmentDanmu({ type: 'bilibili1', segment_start: 0, segment_end: 360, url: segmentUrl });
+    assert.deepEqual(comments, []);
+  });
+
+  assert.equal(seen.length, 1);
+});
+
 test('youku source falls back to a locally generated cna', async (t) => {
   const youkuUrl = 'https://v.youku.com/v_show/id_XNjQ3ODMyNjU3Mg==.html';
 

@@ -838,30 +838,38 @@ export default class BilibiliSource extends BaseSource {
 
         let success = false;
 
-        // 轨道一：直连模式 (非港澳台标记)
+        // 轨道一：直连模式 (非港澳台标记)。风控/网络失败不能终止后续代理回退。
         if (!isOversea) {
-            const res = await httpGet(`${api_epid_cid}?ep_id=${epid}`, {
-               headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" }
-            });
-            const data = typeof res.data === "string" ? JSON.parse(res.data) : res.data;
-            if (data.code === 0 && data.result) {
-               const ep = data.result.episodes.find(e => e.id == epid);
-               if (ep) { cid = ep.cid; duration = ep.duration / 1000; title = ep.share_copy; success = true; }
+            try {
+                const res = await httpGet(`${api_epid_cid}?ep_id=${epid}`, {
+                   headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" }
+                });
+                const data = typeof res.data === "string" ? JSON.parse(res.data) : res.data;
+                if (data.code === 0 && data.result) {
+                   const ep = (data.result.episodes || data.result.main_section?.episodes || []).find(e => e.id == epid);
+                   if (ep) { cid = ep.cid; aid = ep.aid; duration = ep.duration / 1000; title = ep.share_copy || ep.long_title; success = true; }
+                }
+            } catch (e) {
+                log("warn", `[bilibili] 直连番剧信息失败，尝试后续回退: ${e?.message || e}`);
             }
         }
 
-        // 轨道二：代理模式 (港澳台标记 或 直连失败且有seasonId)
-        if ((!success || isOversea) && seasonId && this._hasBilibiliProxy()) {
-            // 尝试 View 接口 (必须走代理)
+        // 轨道二：代理模式。纯 ep URL 没有 season_id 时也必须能代理 ep_id 查询。
+        if ((!success || isOversea) && this._hasBilibiliProxy()) {
             try {
-                const proxyUrl = this._makeProxyUrl(`https://api.bilibili.com/pgc/view/web/season?season_id=${seasonId}`);
+                const targetUrl = seasonId
+                    ? `https://api.bilibili.com/pgc/view/web/season?season_id=${seasonId}`
+                    : `${api_epid_cid}?ep_id=${epid}`;
+                const proxyUrl = this._makeProxyUrl(targetUrl);
                 const res = await httpGet(proxyUrl, { headers: { "Cookie": globals.bilibliCookie || "", "User-Agent": "Mozilla/5.0" } });
                 const data = typeof res.data === "string" ? JSON.parse(res.data) : res.data;
                 if (data.code === 0 && data.result) {
                     const ep = (data.result.episodes || data.result.main_section?.episodes || []).find(e => e.id == epid);
-                    if (ep) { cid = ep.cid; aid = ep.aid; duration = ep.duration / 1000; title = ep.long_title; success = true; }
+                    if (ep) { cid = ep.cid; aid = ep.aid; duration = ep.duration / 1000; title = ep.long_title || ep.share_copy; success = true; }
                 }
-            } catch(e) {}
+            } catch(e) {
+                log("warn", `[bilibili] 代理番剧信息失败: ${e?.message || e}`);
+            }
         }
 
         // 尝试 Section 接口作为回退，直连不走代理，无代理时也能覆盖 Bangumi Data 补充的港澳台条目
@@ -1081,7 +1089,8 @@ export default class BilibiliSource extends BaseSource {
       const urlObj = new URL(segment.url);
       const rawUrl = segment.url.split('#')[0];
 
-      const response = await httpGet(rawUrl, {
+      const requestUrl = this._hasBilibiliProxy() ? this._makeProxyUrl(rawUrl) : rawUrl;
+      const response = await httpGet(requestUrl, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
           "Cookie": globals.bilibliCookie
