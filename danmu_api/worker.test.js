@@ -4478,6 +4478,60 @@ test('movies may omit season and episode while TV uploads default both to one', 
   assert.match(elements.get('local-danmu-upload-status').textContent, /第1季上传成功/);
 });
 
+test('bilibili comment diagnostics expose the first-segment outcome safely', async () => {
+  const originalSegments = BilibiliSource.prototype.getEpisodeDanmuSegments;
+  const originalSegmentDanmu = BilibiliSource.prototype.getEpisodeSegmentDanmu;
+  const sourceUrl = 'https://www.bilibili.com/bangumi/play/ep351870?bsource=360ogvys';
+  const firstSegmentUrl = 'https://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid=249780988&segment_index=1&token=secret';
+
+  Globals.init({ RATE_LIMIT_MAX_REQUESTS: '0' });
+  BilibiliSource.prototype.getEpisodeDanmuSegments = async () => new SegmentListResponse({
+    type: 'bilibili1',
+    duration: 5640,
+    segmentList: [{ type: 'bilibili1', segment_start: 0, segment_end: 360, url: firstSegmentUrl }]
+  });
+
+  try {
+    BilibiliSource.prototype.getEpisodeSegmentDanmu = async () => [
+      { p: '1,1,16777215,test', m: 'sensitive-comment-text' },
+      { p: '2,1,16777215,test', m: 'second-comment' }
+    ];
+    let req = new MockRequest(
+      `${urlPrefix}/api/v2/comment?url=${encodeURIComponent(sourceUrl)}&format=json&diagnostic=1`,
+      { method: 'GET' }
+    );
+    let body = await parseResponse(await handleRequest(req));
+    assert.deepEqual(body, {
+      success: true,
+      diagnostic: true,
+      platform: 'bilibili1',
+      segmentCount: 1,
+      duration: 5640,
+      firstSegmentParsedCount: 2,
+      firstSegmentError: ''
+    });
+    assert.equal(JSON.stringify(body).includes('secret'), false);
+    assert.equal(JSON.stringify(body).includes('249780988'), false);
+    assert.equal(JSON.stringify(body).includes('ep351870'), false);
+
+    BilibiliSource.prototype.getEpisodeSegmentDanmu = async () => {
+      throw new Error('HTTP error! status: 412');
+    };
+    req = new MockRequest(
+      `${urlPrefix}/api/v2/comment?url=${encodeURIComponent(sourceUrl)}&format=json&diagnostic=1`,
+      { method: 'GET' }
+    );
+    body = await parseResponse(await handleRequest(req));
+    assert.equal(body.success, true);
+    assert.equal(body.diagnostic, true);
+    assert.equal(body.firstSegmentParsedCount, 0);
+    assert.equal(body.firstSegmentError, 'http_412');
+  } finally {
+    BilibiliSource.prototype.getEpisodeDanmuSegments = originalSegments;
+    BilibiliSource.prototype.getEpisodeSegmentDanmu = originalSegmentDanmu;
+  }
+});
+
 test('youku source falls back to a locally generated cna', async (t) => {
   const youkuUrl = 'https://v.youku.com/v_show/id_XNjQ3ODMyNjU3Mg==.html';
 

@@ -5,7 +5,7 @@ import { getFavoriteCachesFromRedis, getRedisCaches, judgeRedisValid } from "./u
 import { cleanupExpiredIPs, findUrlById, getCommentCache, getLocalCaches, judgeLocalCacheValid } from "./utils/cache-util.js";
 import { formatDanmuResponse } from "./utils/danmu-util.js";
 import AIClient from './utils/ai-util.js';
-import { getBangumi, getComment, getCommentByUrl, getSegmentComment, matchAnime, searchAnime, searchEpisodes } from "./apis/dandan-api.js";
+import { diagnoseCommentByUrl, getBangumi, getComment, getCommentByUrl, getSegmentComment, matchAnime, searchAnime, searchEpisodes } from "./apis/dandan-api.js";
 import { handleFavoriteAdd, handleFavoriteList, handleFavoriteRefresh, handleFavoriteRemove, handleFavoriteSchedule } from "./apis/favorite-api.js";
 import { getFongmiDanmaku } from "./apis/clients/fongmi-api.js";
 import { handleConfig, handleUI, handleLogs, handleClearLogs, handleDeploy, handleClearCache, handleReqRecords, handleCacheAnimes } from "./apis/system-api.js";
@@ -419,6 +419,8 @@ async function handleRequest(req, env, deployPlatform, clientIp) {
     const durationParam = url.searchParams.get('duration');
     const segmentFlag = segmentFlagParam === 'true' || segmentFlagParam === '1';
     const includeDuration = durationParam === 'true' || durationParam === '1';
+    const diagnosticParam = url.searchParams.get('diagnostic');
+    const diagnostic = diagnosticParam === 'true' || diagnosticParam === '1';
 
     // ⚠️ 限流设计说明：
     // 1. 先检查缓存，缓存命中时直接返回，不计入限流次数
@@ -427,6 +429,9 @@ async function handleRequest(req, env, deployPlatform, clientIp) {
 
     // 如果有url参数，则通过URL获取弹幕
     if (videoUrl) {
+      if (diagnostic) {
+        return jsonResponse(await diagnoseCommentByUrl(videoUrl));
+      }
       // 先检查缓存
       const cachedComments = getCommentCache(videoUrl);
       if (cachedComments !== null) {

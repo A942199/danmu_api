@@ -2707,6 +2707,46 @@ export async function getComment(path, queryFormat, segmentFlag, clientIp, inclu
   return formatDanmuResponse(responseData, queryFormat);
 }
 
+function classifyCommentDiagnosticError(error) {
+  const message = String(error?.message || error || '');
+  const status = /HTTP error! status:\s*(\d{3})/i.exec(message)?.[1];
+  if (status) return `http_${status}`;
+  if (error?.name === 'AbortError' || /timeout|timed out|aborted/i.test(message)) return 'timeout';
+  return 'request_failed';
+}
+
+export async function diagnoseCommentByUrl(videoUrl) {
+  const cleanUrl = stripLinkOffset(String(videoUrl || '').trim()).cleanUrl;
+  if (!cleanUrl || (!cleanUrl.includes('.bilibili.com') && !cleanUrl.includes('b23.tv'))) {
+    return { success: false, diagnostic: true, platform: '', segmentCount: 0, duration: 0, firstSegmentParsedCount: 0, firstSegmentError: 'unsupported_platform' };
+  }
+
+  let resolvedUrl = cleanUrl;
+  if (resolvedUrl.includes('b23.tv')) {
+    resolvedUrl = await sourceLogContext.run('bilibili', () => bilibiliSource.resolveB23Link(resolvedUrl));
+  }
+
+  let segments;
+  try {
+    segments = await sourceLogContext.run('bilibili', () => bilibiliSource.getEpisodeDanmuSegments(resolvedUrl));
+  } catch (error) {
+    return { success: true, diagnostic: true, platform: 'bilibili1', segmentCount: 0, duration: 0, firstSegmentParsedCount: 0, firstSegmentError: classifyCommentDiagnosticError(error) };
+  }
+
+  const segmentList = Array.isArray(segments?.segmentList) ? segments.segmentList : [];
+  const duration = Number(segments?.duration) || 0;
+  if (!segmentList.length) {
+    return { success: true, diagnostic: true, platform: 'bilibili1', segmentCount: 0, duration, firstSegmentParsedCount: 0, firstSegmentError: 'video_info_unavailable' };
+  }
+
+  try {
+    const comments = await sourceLogContext.run('bilibili', () => bilibiliSource.getEpisodeSegmentDanmu(segmentList[0]));
+    return { success: true, diagnostic: true, platform: 'bilibili1', segmentCount: segmentList.length, duration, firstSegmentParsedCount: Array.isArray(comments) ? comments.length : 0, firstSegmentError: '' };
+  } catch (error) {
+    return { success: true, diagnostic: true, platform: 'bilibili1', segmentCount: segmentList.length, duration, firstSegmentParsedCount: 0, firstSegmentError: classifyCommentDiagnosticError(error) };
+  }
+}
+
 // Extracted function for GET /api/v2/comment?url=xxx or /api/v2/extcomment?url=xxx
 export async function getCommentByUrl(videoUrl, queryFormat, segmentFlag, includeDuration = false) {
   try {
