@@ -4530,9 +4530,18 @@ test('bilibili comment diagnostics expose the first-segment outcome safely', asy
     BilibiliSource.prototype.getEpisodeDanmuSegments = async () => new SegmentListResponse({
       type: 'bilibili1', duration: 0, segmentList: []
     });
-    const riskControlFetch = async url => {
+    let browserHeaderProbeSeen = false;
+    const riskControlFetch = async (url, options = {}) => {
       const target = String(url);
       assert.match(target, /pgc\/view\/web\/season\?ep_id=351870/);
+      const headers = new Headers(options?.headers || {});
+      if (headers.get('referer')) {
+        browserHeaderProbeSeen = true;
+        return mockJsonResponse({
+          code: 0,
+          result: { episodes: [{ id: 351870, cid: 249780988, duration: 5640000 }] }
+        }, target);
+      }
       return mockJsonResponse({ code: -352, message: 'risk control' }, target);
     };
     req = new MockRequest(
@@ -4546,6 +4555,12 @@ test('bilibili comment diagnostics expose the first-segment outcome safely', asy
     assert.equal(body.videoInfoCode, -352);
     assert.equal(body.videoInfoEpisodeFound, false);
     assert.equal(body.videoInfoError, '');
+    assert.equal(browserHeaderProbeSeen, true);
+    assert.equal(body.videoInfoBrowserHttpStatus, 200);
+    assert.equal(body.videoInfoBrowserCode, 0);
+    assert.equal(body.videoInfoBrowserEpisodeFound, true);
+    assert.equal(body.videoInfoBrowserError, '');
+    assert.equal(body.videoInfoProxyConfigured, false);
   } finally {
     BilibiliSource.prototype.getEpisodeDanmuSegments = originalSegments;
     BilibiliSource.prototype.getEpisodeSegmentDanmu = originalSegmentDanmu;

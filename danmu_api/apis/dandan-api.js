@@ -2716,41 +2716,69 @@ function classifyCommentDiagnosticError(error) {
 }
 
 async function diagnoseBilibiliVideoInfoRequest(cleanUrl) {
-  const defaults = {
-    videoInfoHttpStatus: 0,
-    videoInfoCode: 0,
-    videoInfoEpisodeFound: false,
-    videoInfoError: '',
-  };
+  const emptyProbe = { httpStatus: 0, code: 0, episodeFound: false, error: '' };
   let epid = '';
   try {
     epid = new URL(cleanUrl).pathname.match(/\/ep(\d+)/i)?.[1] || '';
   } catch {}
-  if (!epid) return { ...defaults, videoInfoError: 'unsupported_episode_url' };
-
-  try {
-    const response = await sourceLogContext.run('bilibili', () => httpGet(
-      `https://api.bilibili.com/pgc/view/web/season?ep_id=${encodeURIComponent(epid)}`,
-      { headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" } }
-    ));
-    const data = typeof response?.data === 'string' ? JSON.parse(response.data) : response?.data;
-    const code = Number(data?.code);
-    const episodes = data?.result?.episodes || data?.result?.main_section?.episodes || [];
+  if (!epid) {
     return {
-      videoInfoHttpStatus: Number(response?.status) || 0,
-      videoInfoCode: Number.isFinite(code) ? code : 0,
-      videoInfoEpisodeFound: Array.isArray(episodes) && episodes.some(item => String(item?.id ?? '') === epid),
-      videoInfoError: '',
-    };
-  } catch (error) {
-    const errorCode = classifyCommentDiagnosticError(error);
-    const httpStatus = /^http_(\d{3})$/.exec(errorCode)?.[1];
-    return {
-      ...defaults,
-      videoInfoHttpStatus: httpStatus ? Number(httpStatus) : 0,
-      videoInfoError: errorCode,
+      videoInfoHttpStatus: 0, videoInfoCode: 0, videoInfoEpisodeFound: false, videoInfoError: 'unsupported_episode_url',
+      videoInfoBrowserHttpStatus: 0, videoInfoBrowserCode: 0, videoInfoBrowserEpisodeFound: false, videoInfoBrowserError: '',
+      videoInfoProxyConfigured: false,
+      videoInfoProxyHttpStatus: 0, videoInfoProxyCode: 0, videoInfoProxyEpisodeFound: false, videoInfoProxyError: '',
     };
   }
+
+  const endpoint = `https://api.bilibili.com/pgc/view/web/season?ep_id=${encodeURIComponent(epid)}`;
+  const probe = async (targetUrl, headers, bypassCache = false) => {
+    try {
+      const response = await sourceLogContext.run('bilibili', () => httpGet(targetUrl, { headers, bypassCache }));
+      const data = typeof response?.data === 'string' ? JSON.parse(response.data) : response?.data;
+      const code = Number(data?.code);
+      const episodes = data?.result?.episodes || data?.result?.main_section?.episodes || [];
+      return {
+        httpStatus: Number(response?.status) || 0,
+        code: Number.isFinite(code) ? code : 0,
+        episodeFound: Array.isArray(episodes) && episodes.some(item => String(item?.id ?? '') === epid),
+        error: '',
+      };
+    } catch (error) {
+      const errorCode = classifyCommentDiagnosticError(error);
+      const httpStatus = /^http_(\d{3})$/.exec(errorCode)?.[1];
+      return { ...emptyProbe, httpStatus: httpStatus ? Number(httpStatus) : 0, error: errorCode };
+    }
+  };
+
+  const direct = await probe(endpoint, { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" });
+  const browserHeaders = {
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Cookie": globals.bilibliCookie || "",
+    "Referer": "https://www.bilibili.com/",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  };
+  const browser = await probe(endpoint, browserHeaders, true);
+  const proxyConfigured = bilibiliSource._hasBilibiliProxy();
+  const proxy = proxyConfigured
+    ? await probe(bilibiliSource._makeProxyUrl(endpoint), browserHeaders, true)
+    : emptyProbe;
+
+  return {
+    videoInfoHttpStatus: direct.httpStatus,
+    videoInfoCode: direct.code,
+    videoInfoEpisodeFound: direct.episodeFound,
+    videoInfoError: direct.error,
+    videoInfoBrowserHttpStatus: browser.httpStatus,
+    videoInfoBrowserCode: browser.code,
+    videoInfoBrowserEpisodeFound: browser.episodeFound,
+    videoInfoBrowserError: browser.error,
+    videoInfoProxyConfigured: proxyConfigured,
+    videoInfoProxyHttpStatus: proxy.httpStatus,
+    videoInfoProxyCode: proxy.code,
+    videoInfoProxyEpisodeFound: proxy.episodeFound,
+    videoInfoProxyError: proxy.error,
+  };
 }
 
 export async function diagnoseCommentByUrl(videoUrl) {
