@@ -4533,6 +4533,15 @@ test('bilibili comment diagnostics expose the first-segment outcome safely', asy
     let browserHeaderProbeSeen = false;
     const riskControlFetch = async (url, options = {}) => {
       const target = String(url);
+      if (target.includes('/pgc/player/web/playurl?')) {
+        return mockJsonResponse({
+          code: 0,
+          result: {
+            timelength: 5640000,
+            durl: [{ url: 'https://video.example/upgcxcode/88/09/249780988/249780988-1.flv?token=secret-playurl' }]
+          }
+        }, target);
+      }
       assert.match(target, /pgc\/view\/web\/season\?ep_id=351870/);
       const headers = new Headers(options?.headers || {});
       if (headers.get('referer')) {
@@ -4561,6 +4570,13 @@ test('bilibili comment diagnostics expose the first-segment outcome safely', asy
     assert.equal(body.videoInfoBrowserEpisodeFound, true);
     assert.equal(body.videoInfoBrowserError, '');
     assert.equal(body.videoInfoProxyConfigured, false);
+    assert.equal(body.videoInfoPlayurlHttpStatus, 200);
+    assert.equal(body.videoInfoPlayurlCode, 0);
+    assert.equal(body.videoInfoPlayurlCidResolved, true);
+    assert.equal(body.videoInfoPlayurlDuration, 5640);
+    assert.equal(body.videoInfoPlayurlError, '');
+    assert.equal(JSON.stringify(body).includes('secret-playurl'), false);
+    assert.equal(JSON.stringify(body).includes('249780988'), false);
   } finally {
     BilibiliSource.prototype.getEpisodeDanmuSegments = originalSegments;
     BilibiliSource.prototype.getEpisodeSegmentDanmu = originalSegmentDanmu;

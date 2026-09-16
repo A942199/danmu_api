@@ -2764,6 +2764,36 @@ async function diagnoseBilibiliVideoInfoRequest(cleanUrl) {
     ? await probe(bilibiliSource._makeProxyUrl(endpoint), browserHeaders, true)
     : emptyProbe;
 
+  const playurlEndpoint = `https://api.bilibili.com/pgc/player/web/playurl?ep_id=${encodeURIComponent(epid)}&qn=16&fnval=0&fnver=0&otype=json`;
+  let playurl = { httpStatus: 0, code: 0, cidResolved: false, duration: 0, error: '' };
+  try {
+    const response = await sourceLogContext.run('bilibili', () => httpGet(playurlEndpoint, { headers: browserHeaders, bypassCache: true }));
+    const data = typeof response?.data === 'string' ? JSON.parse(response.data) : response?.data;
+    const code = Number(data?.code);
+    const result = data?.result || data?.data || {};
+    const candidateUrls = [];
+    for (const item of Array.isArray(result?.durl) ? result.durl : []) {
+      if (item?.url) candidateUrls.push(String(item.url));
+      for (const value of Array.isArray(item?.backup_url) ? item.backup_url : []) candidateUrls.push(String(value));
+    }
+    for (const item of Array.isArray(result?.dash?.video) ? result.dash.video : []) {
+      if (item?.baseUrl || item?.base_url) candidateUrls.push(String(item.baseUrl || item.base_url));
+      for (const value of Array.isArray(item?.backupUrl || item?.backup_url) ? (item.backupUrl || item.backup_url) : []) candidateUrls.push(String(value));
+    }
+    const cidResolved = candidateUrls.some(value => /\/(\d{5,})\/\1(?:[-_.\/?]|$)/.test(value));
+    playurl = {
+      httpStatus: Number(response?.status) || 0,
+      code: Number.isFinite(code) ? code : 0,
+      cidResolved,
+      duration: Math.max(0, (Number(result?.timelength) || 0) / 1000),
+      error: '',
+    };
+  } catch (error) {
+    const errorCode = classifyCommentDiagnosticError(error);
+    const httpStatus = /^http_(\d{3})$/.exec(errorCode)?.[1];
+    playurl = { httpStatus: httpStatus ? Number(httpStatus) : 0, code: 0, cidResolved: false, duration: 0, error: errorCode };
+  }
+
   return {
     videoInfoHttpStatus: direct.httpStatus,
     videoInfoCode: direct.code,
@@ -2777,6 +2807,11 @@ async function diagnoseBilibiliVideoInfoRequest(cleanUrl) {
     videoInfoProxyHttpStatus: proxy.httpStatus,
     videoInfoProxyCode: proxy.code,
     videoInfoProxyEpisodeFound: proxy.episodeFound,
+    videoInfoPlayurlHttpStatus: playurl.httpStatus,
+    videoInfoPlayurlCode: playurl.code,
+    videoInfoPlayurlCidResolved: playurl.cidResolved,
+    videoInfoPlayurlDuration: playurl.duration,
+    videoInfoPlayurlError: playurl.error,
     videoInfoProxyError: proxy.error,
   };
 }
