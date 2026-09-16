@@ -434,6 +434,16 @@ test('worker.js API endpoints', async (t) => {
           add(qiyiAnime);
           return;
         }
+        if (scenario === 'platform-contamination') {
+          const polluted = createFavoriteAnime('平台污染剧(2026)【电视剧】from 360', 2, 930008);
+          polluted.source = '360';
+          polluted.links.forEach((link, index) => {
+            link.url = `https://www.bilibili.com/bangumi/play/ep${930080 + index}`;
+            link.title = `【bilibili1】 第${index + 1}集`;
+          });
+          add(polluted);
+          return;
+        }
         if (scenario === 'naruto') {
           if (title === '火影忍者 疾风传') {
             add(createFavoriteAnime('火影忍者疾风传(2007)【动漫】from 360', 70, 930006));
@@ -515,6 +525,15 @@ test('worker.js API endpoints', async (t) => {
         scenario = 'platform';
         body = await runMatch({ AUTO_MATCH_MAPPING_TABLE: '航海王 S01E01->航海王 S01E01 @qiyi' }, '航海王 S01E01 @qq');
         assert.equal(body.matches[0].animeId, 930005);
+
+        scenario = 'platform-contamination';
+        const platformLogStart = Globals.logBuffer.length;
+        body = await runMatch({ PLATFORM_ORDER: 'qq' }, '平台污染剧(2026) S01E01 @qq');
+        const platformLogs = Globals.logBuffer.slice(platformLogStart).map(entry => entry.message);
+        assert.equal(body.isMatched, true);
+        assert.match(body.matches[0].url, /bilibili\.com/);
+        assert.equal(platformLogs.some(message => message.includes('Found match with platform: qq')), false);
+        assert.equal(platformLogs.some(message => message.includes('Found match with platform: default')), true);
 
         scenario = 'naruto';
         resetFavoriteState({ AUTO_MATCH_MAPPING_TABLE: '火影忍者 S01E57->火影忍者 疾风传(2007)【日番】 S01E59' });

@@ -1505,6 +1505,12 @@ async function matchAniAndEp(season, episode, year, searchData, title, req, plat
             currentScore = 1;
         }
 
+        // 平台是当前轮次的硬约束。后续的手动偏好、多集结构等奖励只能用于
+        // 同平台候选之间排序，不能把基础平台得分为 0 的候选抬成有效命中。
+        if (platform && currentScore <= 0) {
+            continue;
+        }
+
         // 赋予手动指定偏好最高分数权重，确保其在多源匹配中具有绝对优先级
         if (isPreferredAnime) {
             currentScore += 9999;
